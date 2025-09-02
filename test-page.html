@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Supabase Auth Test Page</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.39.0/dist/umd/supabase.min.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background: #2563eb;
+        }
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        .success { color: #059669; }
+        .error { color: #dc2626; }
+        .info { color: #0891b2; }
+        .results {
+            background: #f8fafc;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        input {
+            padding: 8px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 4px;
+            margin: 5px;
+            width: 200px;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+        .status.success { background: #d1fae5; border: 1px solid #10b981; }
+        .status.error { background: #fee2e2; border: 1px solid #ef4444; }
+        .status.info { background: #dbeafe; border: 1px solid #3b82f6; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 Supabase Auth & RLS Test Page</h1>
+        <p class="info">Use this page to test your Supabase authentication and role-based access control setup.</p>
+        
+        <div id="status" class="status info">
+            <strong>Status:</strong> <span id="statusText">Initializing...</span>
+        </div>
+
+        <!-- Configuration Section -->
+        <div class="section">
+            <h2>⚙️ Configuration</h2>
+            <p>Enter your Supabase project details:</p>
+            <input type="url" id="supabaseUrl" placeholder="https://your-project.supabase.co" style="width: 300px;">
+            <input type="text" id="supabaseKey" placeholder="Your anon key" style="width: 300px;">
+            <button onclick="initializeSupabase()">Initialize Supabase</button>
+            <div id="configResults" class="results" style="display: none;"></div>
+        </div>
+
+        <!-- Session Management -->
+        <div class="section">
+            <h2>🔄 Session Management</h2>
+            <p>Current user role: <span id="userRole" class="info">Not loaded</span></p>
+            <button onclick="refreshSession()">Refresh Session</button>
+            <button onclick="getCurrentRole()">Get Current Role</button>
+            <div id="sessionResults" class="results" style="display: none;"></div>
+        </div>
+
+        <!-- Jobs Access Testing -->
+        <div class="section">
+            <h2>🧪 Jobs Access Testing</h2>
+            <p>Test your RLS policies by accessing the jobs table:</p>
+            <button onclick="testJobsAccess()">Test Jobs Access</button>
+            <div id="jobsResults" class="results" style="display: none;"></div>
+        </div>
+
+        <!-- Technician Invitations -->
+        <div class="section">
+            <h2>📧 Technician Invitations</h2>
+            <p>Send magic links to technicians:</p>
+            <input type="email" id="inviteEmail" placeholder="technician@example.com">
+            <input type="text" id="inviteName" placeholder="Technician Name">
+            <button onclick="inviteTechnician()">Send Magic Link</button>
+            
+            <div style="margin-top: 15px;">
+                <p>Quick invite predefined technicians:</p>
+                <button onclick="inviteChris()">Invite Chris</button>
+                <button onclick="inviteKian()">Invite Kian</button>
+                <button onclick="inviteSteven()">Invite Steven</button>
+                <button onclick="inviteAll()">Invite All Three</button>
+            </div>
+            <div id="inviteResults" class="results" style="display: none;"></div>
+        </div>
+
+        <!-- Complete Verification -->
+        <div class="section">
+            <h2>🔍 Complete Verification</h2>
+            <p>Run a comprehensive test of your entire setup:</p>
+            <button onclick="verifyCompleteSetup()">Verify Complete Setup</button>
+            <div id="verifyResults" class="results" style="display: none;"></div>
+        </div>
+    </div>
+
+    <script>
+        let supabase = null;
+
+        // Initialize Supabase client
+        function initializeSupabase() {
+            const url = document.getElementById('supabaseUrl').value;
+            const key = document.getElementById('supabaseKey').value;
+            
+            if (!url || !key) {
+                showResult('configResults', 'Please enter both Supabase URL and anon key', 'error');
+                return;
+            }
+            
+            try {
+                supabase = window.supabase.createClient(url, key);
+                showResult('configResults', '✅ Supabase client initialized successfully', 'success');
+                updateStatus('Supabase initialized', 'success');
+                getCurrentRole();
+            } catch (error) {
+                showResult('configResults', '❌ Failed to initialize Supabase: ' + error.message, 'error');
+                updateStatus('Initialization failed', 'error');
+            }
+        }
+
+        // Refresh user session
+        async function refreshSession() {
+            if (!supabase) {
+                showResult('sessionResults', 'Please initialize Supabase first', 'error');
+                return;
+            }
+
+            try {
+                showResult('sessionResults', '🔄 Refreshing session...', 'info');
+                
+                const { data, error } = await supabase.auth.refreshSession();
+                
+                if (error) {
+                    throw error;
+                }
+                
+                const result = {
+                    success: true,
+                    accessToken: data.session?.access_token?.substring(0, 20) + '...',
+                    expiresAt: new Date(data.session?.expires_at * 1000).toLocaleString(),
+                    userRole: data.session?.user?.user_metadata?.role
+                };
+                
+                showResult('sessionResults', '✅ Session refreshed:\n' + JSON.stringify(result, null, 2), 'success');
+                updateUserRole(result.userRole);
+                
+            } catch (error) {
+                showResult('sessionResults', '❌ Session refresh failed: ' + error.message, 'error');
+            }
+        }
+
+        // Get current user role
+        async function getCurrentRole() {
+            if (!supabase) {
+                showResult('sessionResults', 'Please initialize Supabase first', 'error');
+                return;
+            }
+
+            try {
+                const { data: { user }, error } = await supabase.auth.getUser();
+                
+                if (error) throw error;
+                
+                const role = user?.user_metadata?.role || 'No role assigned';
+                updateUserRole(role);
+                showResult('sessionResults', `Current user role: ${role}`, 'info');
+                
+                return role;
+            } catch (error) {
+                showResult('sessionResults', '❌ Failed to get user role: ' + error.message, 'error');
+                updateUserRole('Error');
+            }
+        }
+
+        // Test jobs table access
+        async function testJobsAccess() {
+            if (!supabase) {
+                showResult('jobsResults', 'Please initialize Supabase first', 'error');
+                return;
+            }
+
+            try {
+                showResult('jobsResults', '🧪 Testing jobs access...', 'info');
+                
+                // First refresh session
+                await supabase.auth.refreshSession();
+                
+                // Test SELECT
+                const { data: jobs, error: selectError } = await supabase
+                    .from('jobs')
+                    .select('*')
+                    .limit(5);
+                
+                if (selectError) {
+                    throw new Error(`SELECT failed: ${selectError.message}`);
+                }
+                
+                // Test INSERT
+                const testJob = {
+                    title: 'Test Job - ' + new Date().toISOString(),
+                    description: 'Test job created from browser test page',
+                    status: 'pending'
+                };
+                
+                const { data: newJob, error: insertError } = await supabase
+                    .from('jobs')
+                    .insert([testJob])
+                    .select();
+                
+                if (insertError) {
+                    throw new Error(`INSERT failed: ${insertError.message}`);
+                }
+                
+                const result = {
+                    success: true,
+                    selectSuccess: true,
+                    insertSuccess: true,
+                    jobsFound: jobs?.length || 0,
+                    newJobId: newJob?.[0]?.id,
+                    testJobTitle: newJob?.[0]?.title
+                };
+                
+                showResult('jobsResults', '✅ Jobs access test successful:\n' + JSON.stringify(result, null, 2), 'success');
+                
+            } catch (error) {
+                showResult('jobsResults', '❌ Jobs access test failed: ' + error.message, 'error');
+            }
+        }
+
+        // Invite single technician
+        async function inviteTechnician() {
+            const email = document.getElementById('inviteEmail').value;
+            const name = document.getElementById('inviteName').value;
+            
+            if (!email) {
+                showResult('inviteResults', 'Please enter an email address', 'error');
+                return;
+            }
+            
+            await sendMagicLink(email, name);
+        }
+
+        // Quick invite functions
+        async function inviteChris() {
+            await sendMagicLink('chris@example.com', 'Chris');
+        }
+
+        async function inviteKian() {
+            await sendMagicLink('kian@example.com', 'Kian');
+        }
+
+        async function inviteSteven() {
+            await sendMagicLink('steven@example.com', 'Steven');
+        }
+
+        async function inviteAll() {
+            const technicians = [
+                { email: 'chris@example.com', name: 'Chris' },
+                { email: 'kian@example.com', name: 'Kian' },
+                { email: 'steven@example.com', name: 'Steven' }
+            ];
+            
+            showResult('inviteResults', '📧 Sending invitations to all technicians...', 'info');
+            
+            for (const tech of technicians) {
+                await sendMagicLink(tech.email, tech.name);
+                // Small delay between invites
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+        }
+
+        // Send magic link helper
+        async function sendMagicLink(email, name) {
+            if (!supabase) {
+                showResult('inviteResults', 'Please initialize Supabase first', 'error');
+                return;
+            }
+
+            try {
+                showResult('inviteResults', `📧 Sending magic link to ${name || email}...`, 'info');
+                
+                const { data, error } = await supabase.auth.signInWithOtp({
+                    email: email,
+                    options: {
+                        emailRedirectTo: `${window.location.origin}/auth/callback`,
+                        data: {
+                            role: 'technician',
+                            invited_by: (await supabase.auth.getUser()).data.user?.email,
+                            technician_name: name
+                        }
+                    }
+                });
+                
+                if (error) throw error;
+                
+                const result = `✅ Magic link sent to ${name || 'technician'} (${email})`;
+                showResult('inviteResults', result, 'success');
+                
+                // Clear form
+                document.getElementById('inviteEmail').value = '';
+                document.getElementById('inviteName').value = '';
+                
+            } catch (error) {
+                showResult('inviteResults', `❌ Failed to send magic link to ${email}: ${error.message}`, 'error');
+            }
+        }
+
+        // Complete setup verification
+        async function verifyCompleteSetup() {
+            if (!supabase) {
+                showResult('verifyResults', 'Please initialize Supabase first', 'error');
+                return;
+            }
+
+            try {
+                showResult('verifyResults', '🔍 Running complete setup verification...', 'info');
+                
+                const results = {
+                    timestamp: new Date().toISOString(),
+                    userRole: null,
+                    isAdmin: false,
+                    sessionRefresh: false,
+                    jobsAccess: null
+                };
+                
+                // Check user role
+                const role = await getCurrentRole();
+                results.userRole = role;
+                results.isAdmin = role === 'admin';
+                
+                // Test session refresh
+                const { data: sessionData, error: sessionError } = await supabase.auth.refreshSession();
+                results.sessionRefresh = !sessionError && !!sessionData.session;
+                
+                // Test jobs access
+                try {
+                    const { data: jobs, error: jobsError } = await supabase.from('jobs').select('*').limit(1);
+                    results.jobsAccess = {
+                        success: !jobsError,
+                        error: jobsError?.message,
+                        canRead: !jobsError
+                    };
+                } catch (jobsErr) {
+                    results.jobsAccess = {
+                        success: false,
+                        error: jobsErr.message,
+                        canRead: false
+                    };
+                }
+                
+                const allGood = results.isAdmin && results.sessionRefresh && results.jobsAccess?.success;
+                const status = allGood ? '✅ All systems operational!' : '⚠️ Some issues detected';
+                
+                showResult('verifyResults', status + '\n\nDetailed Results:\n' + JSON.stringify(results, null, 2), 
+                          allGood ? 'success' : 'error');
+                
+            } catch (error) {
+                showResult('verifyResults', '❌ Setup verification failed: ' + error.message, 'error');
+            }
+        }
+
+        // Helper functions
+        function showResult(elementId, message, type) {
+            const element = document.getElementById(elementId);
+            element.textContent = message;
+            element.style.display = 'block';
+            element.className = 'results ' + type;
+        }
+
+        function updateStatus(message, type) {
+            document.getElementById('statusText').textContent = message;
+            const statusElement = document.getElementById('status');
+            statusElement.className = 'status ' + type;
+        }
+
+        function updateUserRole(role) {
+            document.getElementById('userRole').textContent = role || 'Not loaded';
+        }
+
+        // Initialize on page load
+        window.addEventListener('load', () => {
+            updateStatus('Ready - please configure Supabase', 'info');
+        });
+    </script>
+</body>
+</html>
+

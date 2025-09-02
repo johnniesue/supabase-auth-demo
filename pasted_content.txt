@@ -1,0 +1,232 @@
+1️⃣ Install the Supabase client (if you haven’t already)
+# npm
+
+npm i @supabase/supabase-js@2.39.0   
+# pin a version for reproducibility
+
+Edge Functions already have the environment variables SUPABASE_URL and SUPABASE_ANON_KEY (or SUPABASE_SERVICE_ROLE_KEY for privileged operations). No extra install step is needed if you’re writing the function in the functions/ directory; the CLI bundles the dependency automatically.
+
+2️⃣ Initialize the client
+import
+ { createClient } 
+from
+ 
+"npm:@supabase/supabase-js@2.39.0"
+;
+const
+ supabase = createClient(
+  Deno.env.get(
+"SUPABASE_URL"
+)!,          
+// → https://<project>.supabase.co
+
+  Deno.env.get(
+"SUPABASE_ANON_KEY"
+)!      
+// public anon key (or service role key if needed)
+
+);
+
+If you already have a supabase instance (e.g., from a previous import), you can skip this step.
+
+3️⃣ Call refreshSession
+async
+ 
+function
+ 
+refreshUserSession
+(
+) 
+{
+  
+const
+ { data, error } = 
+await
+ supabase.auth.refreshSession();
+  
+if
+ (error) {
+    
+console
+.error(
+"❗ Session refresh failed:"
+, error.message);
+    
+return
+ 
+null
+;
+  }
+  
+console
+.log(
+"✅ Session refreshed"
+);
+  
+console
+.log(
+"New access token:"
+, data.session?.access_token);
+  
+console
+.log(
+"Expires at:"
+, 
+new
+ 
+Date
+(data.session?.expires_at! * 
+1000
+));
+  
+// The client now automatically uses the refreshed token for subsequent requests.
+
+  
+return
+ data.session;
+}
+// Example usage
+
+await
+ refreshUserSession();
+
+What the call does
+Sends the refresh token (stored in the browser’s local storage or the Edge Function’s cookie) to Supabase’s /auth/v1/token?grant_type=refresh_token endpoint.
+Receives a new access token and optionally a new refresh token.
+Updates the client’s internal session, so any further supabase.from(...), supabase.storage.from(...), etc., use the fresh token automatically.
+4️⃣ Edge‑Function‑specific notes
+If you’re running this inside a Supabase Edge Function, the client must be instantiated with the service‑role key (or a user JWT passed via the request) because Edge Functions don’t have a browser‑style local storage.
+
+export
+ 
+async
+ 
+function
+ 
+handler
+(
+req: Request
+) 
+{
+  
+// Grab the user JWT from the Authorization header (if you want to act as the user)
+
+  
+const
+ authHeader = req.headers.get(
+"Authorization"
+); 
+// "Bearer <jwt>"
+
+  
+const
+ userJwt = authHeader?.split(
+" "
+).pop();
+  
+const
+ supabase = createClient(
+    Deno.env.get(
+"SUPABASE_URL"
+)!,
+    
+// Use the user JWT for user‑scoped actions, otherwise fall back to service role.
+
+    userJwt ?? Deno.env.get(
+"SUPABASE_SERVICE_ROLE_KEY"
+)!
+  );
+  
+// Refresh the session for the user (only works if a refresh token is present,
+
+  
+// which typically isn’t sent from the client to an edge function – you would
+
+  
+// instead just use the provided JWT directly).
+
+  
+const
+ result = 
+await
+ supabase.auth.refreshSession();
+  
+// …handle result as shown above…
+
+  
+return
+ 
+new
+ Response(
+JSON
+.stringify({ 
+ok
+: 
+true
+ }), {
+    
+headers
+: { 
+"Content-Type"
+: 
+"application/json"
+ },
+  });
+}
+
+Important: A refresh token is not automatically sent to Edge Functions. If you need to rotate tokens client‑side, call refreshSession in the front‑end code (browser/mobile) rather than inside an Edge Function.
+
+5️⃣ Common pitfalls
+Symptom	Cause	Fix
+error: "Missing refresh token"	No stored refresh token in the client (e.g., after a full sign‑out or in a server‑side context).	Ensure the user signed in and the refresh token is still in local storage, or use the service‑role key for privileged server tasks.
+error: "Invalid JWT"	Supplied JWT is malformed or expired.	Re‑authenticate the user (supabase.auth.signIn...) to obtain a fresh token.
+error: "Network request failed"	Wrong SUPABASE_URL or firewall blocking.	Verify the URL matches the project’s API endpoint.
+TL;DR Code snippet
+import
+ { createClient } 
+from
+ 
+"npm:@supabase/supabase-js@2.39.0"
+;
+const
+ supabase = createClient(
+  Deno.env.get(
+"SUPABASE_URL"
+)!,
+  Deno.env.get(
+"SUPABASE_ANON_KEY"
+)!
+);
+async
+ 
+function
+ 
+refresh
+(
+) 
+{
+  
+const
+ { data, error } = 
+await
+ supabase.auth.refreshSession();
+  
+if
+ (error) 
+throw
+ error;
+  
+console
+.log(
+"New token:"
+, data.session?.access_token);
+  
+return
+ data.session;
+}
+// Call it
+
+await
+ refresh();
+
+Feel free to copy‑paste this into your front‑end app, a Deno script, or an Edge Function (adjusting the auth key as needed). Let me know if you need help wiring it into a specific framework or handling the response!
